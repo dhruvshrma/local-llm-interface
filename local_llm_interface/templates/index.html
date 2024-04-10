@@ -28,8 +28,9 @@
       <option value="">Select a model...</option>
     </select>
     <br />
-    <textarea id="query-input" placeholder="Enter your query..."></textarea>
-    <textarea id="response-output" readonly></textarea>
+    <div id="response-container">
+        <textarea id="query-input" placeholder="Enter your query here..."></textarea>
+    </div>
 
     <script src ="{{ url_for('static', filename='js/chat.js') }}"></script>
   </body>

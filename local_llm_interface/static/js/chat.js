@@ -1,8 +1,11 @@
 document.addEventListener("DOMContentLoaded", function () {
     const modelSelect = document.getElementById("model-select");
-    const queryInput = document.getElementById("query-input");
-    // const submitBtn = document.getElementById("submit-btn");
-    const responseOutput = document.getElementById("response-output");
+    const initialQueryInput = document.getElementById("query-input");
+    const conversationContainer = document.getElementById("response-container");
+  
+    initialQueryInput.addEventListener("keypress", function(event) {
+      handleQuerySubmit(event, modelSelect, conversationContainer);
+    });
 
     fetch("/api/models")
         .then((response) => response.json())
@@ -22,64 +25,59 @@ document.addEventListener("DOMContentLoaded", function () {
     modelSelect.onchange = function () {
         modelSelect.disabled = !this.value;
     };
+}); 
 
-    queryInput.addEventListener("keypress", function(e){
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            if (!modelSelect.value) {
-                alert("Please select a model first!");
-                return;
-            }
+function handleQuerySubmit(event, modelSelect, container) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault(); 
+  
+      const queryInput = event.target; 
+      const model = modelSelect.value;
+  
+      if (!model) {
+        alert("Please select a model first.");
+        return;
+      }
+  
+      const query = queryInput.value;
+  
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model, query: query }),
+      })
+      .then(async (response) => {
+        const newResponseOutput = document.createElement("textarea");
+        newResponseOutput.readOnly = true;
+        container.appendChild(newResponseOutput);
+  
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = new TextDecoder().decode(value);
+          newResponseOutput.value += text;
+          adjustTextareaHeight(newResponseOutput);
         }
-        const model = modelSelect.value;
-        const query = queryInput.value;
+        createNewQueryInput(container, modelSelect); 
+      })
+      .catch((error) => {
+        console.error("Error:", error);
+      });
+    }
+  }
 
-        // Disable form elements during request
-        // submitBtn.disabled = true;
-        modelSelect.disabled = true;
-        queryInput.disabled = true;
-
-        // Fetch API setup for streaming response
-        fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: model, query: query }),
-        })
-            .then(async (response) => {
-                const reader = response.body.getReader();
-                // let newResponseOutput = document.createElement("textarea");
-                // newResponseOutput.readOnly = true;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const text = new TextDecoder().decode(value);
-                    responseOutput.value += text; // Append streamed response
-
-                    responseOutput.style.height = "auto";
-                    responseOutput.style.height = responseOutput.scrollHeight + "px"; // Auto-expand textarea
-                }
-                createNewQueryInput(responseContainer, modelSelect);
-                // Re-enable form elements after streaming ends
-                // submitBtn.disabled = false;
-                modelSelect.disabled = false;
-                queryInput.disabled = false;
-            })
-            .catch((error) => {
-                console.error("Error:", error);
-                // Re-enable form elements in case of error
-                // submitBtn.disabled = false;
-                modelSelect.disabled = false;
-                queryInput.disabled = false;
-            });
-    });
-});
-
-function createNewQueryInput(container, modelSelect){
+  function createNewQueryInput(container, modelSelect) {
     let newQueryInput = document.createElement("textarea");
-    newQueryInput.placeholder = "Type your message here...";
-    newQueryInput.id = "query-input";
     container.appendChild(newQueryInput);
     newQueryInput.focus();
-    
+
+    newQueryInput.addEventListener("keypress", function(event) {
+      handleQuerySubmit(event, modelSelect, container);
+    });
+  }
+
+  function adjustTextareaHeight(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
 }
