@@ -16,6 +16,7 @@ requests-mock = "^1.12.1"
 gevent = "^24.2.1"
 gevent-websocket = "^0.10.1"
 flask-session = "^0.8.0"
+redis = "^5.0.3"
 
 
 [build-system]

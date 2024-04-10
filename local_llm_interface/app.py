@@ -1,14 +1,85 @@
-from flask import Flask, jsonify, render_template, request, Response, session
-from flask_session import Session
-
+from flask import Flask, jsonify, render_template, request, Response,g
+import redis 
 import ollama
+import uuid
+from datetime import datetime
+import atexit
+import sqlite3
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'my_key'
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_PERMANENT'] = False
 
-Session(app)
+redis_conn = redis.Redis(host='localhost', port=6389, db=0, decode_responses=True)
+
+DATABASE = 'conversations.db'
+
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+    return db
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+        
+def save_conversations_to_db():
+    db = None 
+    try:
+        db = sqlite3.connect(DATABASE)
+        cursor = db.cursor()
+        # Example: Fetching all conversation IDs (adjust according to your key naming pattern)
+        conversation_ids = redis_conn.keys('conversation:*')
+
+        for conversation_id in conversation_ids:
+            # Fetch conversation details from Redis
+            model, start_time = redis_conn.hmget(conversation_id, 'model', 'start_time')
+
+            # Insert or update the conversation in SQLite
+            cursor.execute('INSERT INTO conversations (id, model, start_time) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = ?, start_time = ?',
+                           (conversation_id, model, str(start_time), model, str(start_time)))
+
+            # Fetch all messages for the conversation
+            message_ids = redis_conn.lrange(f'{conversation_id}:messages', 0, -1)
+            for message_id in message_ids:
+                role, content, timestamp_utc = redis_conn.hmget(f'message:{message_id}', 'role', 'content', 'timestamp_utc')
+
+                # Insert message into SQLite, adjust fields as necessary
+                cursor.execute('INSERT INTO messages (id, conversation_id, role, content, timestamp_utc) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
+                               (message_id, conversation_id, role, content, str(timestamp_utc)))
+
+        db.commit()
+    except Exception as e:
+        
+        print(f"Error saving conversations to DB: {e}")
+        if db:
+            db.rollback()
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+atexit.register(save_conversations_to_db)
+
+def start_conversation(conversation_id, model_name):
+    redis_conn.hset(f"conversation:{conversation_id}", "model", model_name)
+    redis_conn.hset(f"conversation:{conversation_id}", "start_time", datetime.now().isoformat())
+
+def add_message_to_conversation(conversation_id, role, message):
+    message_id = str(uuid.uuid4())
+    redis_conn.hmset(f"message:{message_id}", {"content": message, "role": role, "timestamp": datetime.now().isoformat()})
+    redis_conn.rpush(f"conversation:{conversation_id}:messages", f"message:{message_id}")
+
+def get_conversation_messages(conversation_id):
+    message_ids = redis_conn.lrange(f"conversation:{conversation_id}:messages", 0, -1)
+    messages = []
+    for message_id in message_ids:
+        message = redis_conn.hgetall(message_id)
+        messages.append(message)
+    return messages
+
 
 @app.route('/')
 def home():
@@ -34,26 +105,29 @@ def chat():
     if not model or not user_query:
         return jsonify({'error': 'Model and query are required.'}), 400
     
-    if 'messages' not in session:
-        session['messages'] = []
-    
-    session['messages'].append({'role': 'user', 'content': user_query})
+    conversation_id = data.get('conversation_id')
+    print(conversation_id)
+    if not conversation_id:
+        conversation_id = str(uuid.uuid4())
+        start_conversation(conversation_id=conversation_id, model_name=model)
         
-    session.modified = True
-
-    def generate(messages):
-        stream = ollama.chat(model=model, messages=messages, stream=True)
-        response_content = ""
-        for chunk in stream:
-            part = chunk['message']['content']
-            response_content += part
-            yield part 
+    add_message_to_conversation(conversation_id, 'user', user_query)
+    try:
+        def generate():
+            stream = ollama.chat(model=model, messages=get_conversation_messages(conversation_id), stream=True)
+            response_content = ""
+            for chunk in stream:
+                part = chunk['message']['content']
+                response_content += part
+                yield part 
+            add_message_to_conversation(conversation_id, 'assistant', response_content)
         
-        messages.append({'role': 'assistant', 'content': response_content})
-    session.modified = True
-    print(session['messages'])
-
-    return Response(generate(session['messages']), mimetype='text/plain')
+        response = Response(generate(), mimetype='text/plain')
+        response.headers['X-Conversation-ID'] = conversation_id
+        return response
+    except Exception as e:
+        print(f"Error during chat operation: {e}")
+        return jsonify({'error': 'Failed to process the chat request.'}), 500
 
 
 if __name__ == '__main__':

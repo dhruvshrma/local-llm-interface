@@ -1,3 +1,4 @@
+let currentConversationId = null;
 document.addEventListener("DOMContentLoaded", function () {
     const modelSelect = document.getElementById("model-select");
     const initialQueryInput = document.getElementById("query-input");
@@ -44,7 +45,14 @@ function handleQuerySubmit(event, modelSelect, container) {
       fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: model, query: query }),
+        body: JSON.stringify({ model: model, query: query, conversation_id: currentConversationId }),
+      })
+      .then(response => {
+        const conversationId = response.headers.get("X-Conversation-ID");
+        if (conversationId) {
+          currentConversationId = conversationId;
+        }
+        return response;
       })
       .then(async (response) => {
         const newResponseOutput = document.createElement("textarea");
