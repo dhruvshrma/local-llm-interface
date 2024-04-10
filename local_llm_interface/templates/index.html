@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Local LLM Interface</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .response-container {
+        margin-top: 20px;
+      }
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        margin-bottom: 10px;
+      }
+      textarea#response-output {
+        overflow: hidden; /* Hide scrollbar */
+        transition: height 0.2s; /* Smooth transition for height change */
+    }
+    </style>
+  </head>
+  <body>
+    <h1>Local LLM Interface</h1>
+    <select id="model-select">
+      <option value="">Select a model...</option>
+    </select>
+    <br />
+    <textarea id="query-input" placeholder="Enter your query..."></textarea>
+    <textarea id="response-output" readonly></textarea>
+
+    <script src ="{{ url_for('static', filename='js/chat.js') }}"></script>
+  </body>
+</html>
