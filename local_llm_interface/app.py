@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request, Response,g
+from flask import Flask, jsonify, render_template, request, Response
 import redis 
 import ollama
 import uuid
@@ -12,40 +12,23 @@ redis_conn = redis.Redis(host='localhost', port=6389, db=0, decode_responses=Tru
 
 DATABASE = 'conversations.db'
 
-def get_db():
-    db = getattr(g, '_database', None)
-    if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-    return db
-
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, '_database', None)
-    if db is not None:
-        db.close()
-        
 def save_conversations_to_db():
     db = None 
     try:
         db = sqlite3.connect(DATABASE)
         cursor = db.cursor()
-        # Example: Fetching all conversation IDs (adjust according to your key naming pattern)
-        conversation_ids = redis_conn.keys('conversation:*')
+
+        conversation_ids = [key for key in redis_conn.keys('conversation:*') if not key.endswith(':messages')]
 
         for conversation_id in conversation_ids:
-            # Fetch conversation details from Redis
             model, start_time = redis_conn.hmget(conversation_id, 'model', 'start_time')
-
-            # Insert or update the conversation in SQLite
             cursor.execute('INSERT INTO conversations (id, model, start_time) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = ?, start_time = ?',
                            (conversation_id, model, str(start_time), model, str(start_time)))
 
-            # Fetch all messages for the conversation
             message_ids = redis_conn.lrange(f'{conversation_id}:messages', 0, -1)
             for message_id in message_ids:
-                role, content, timestamp_utc = redis_conn.hmget(f'message:{message_id}', 'role', 'content', 'timestamp_utc')
+                role, content, timestamp_utc = redis_conn.hmget(f'{message_id}', 'role', 'content', 'timestamp')
 
-                # Insert message into SQLite, adjust fields as necessary
                 cursor.execute('INSERT INTO messages (id, conversation_id, role, content, timestamp_utc) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
                                (message_id, conversation_id, role, content, str(timestamp_utc)))
 
